@@ -9,7 +9,11 @@ int main() {
 	uchar *image = calloc(XSIZE * YSIZE * 3, 1); // Three uchars per pixel (RGB)
 	readbmp("before.bmp", image);
 
-	// Alter the image here
+    // Altering image
+    for (int i = 0; i < XSIZE * YSIZE * 3; i++) {
+        // Invert the color
+        image[i] = 255 - image[i];
+    }
 
 	savebmp("after.bmp", image, XSIZE, YSIZE);
 	free(image);
