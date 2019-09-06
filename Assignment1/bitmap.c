@@ -43,3 +43,41 @@ void readbmp(char* filename, uchar* array) {
 	}
 	fclose(img); //close the file
 }
+
+void invertbmp(uchar* image, int width, int height, int channels) {
+    /* Inverts the image colors */
+    for (int i = 0; i < width * height * channels; i++) {
+        image[i] = 255 - image[i];
+    } 
+}
+
+uchar* scalebmp(uchar* image, int width, int height,int channels, int scale_factor) {
+    /* Scales the image by the scale_factor in both directions */
+    uchar *new_image = calloc(scale_factor * scale_factor * width * height * channels, 1);
+
+    int new_width = width * scale_factor;
+
+    // Loop over old image
+    for (int y = 0; y < height; y++) { // Row number
+        for (int x = 0; x < width; x++) { // Column number
+            for (int c = 0; c < 3; c++) { // Channel number
+
+                // 3D index = [row][column][channe]
+                // 3D index -> 1D index
+                int index = y * width * 3 + x * 3 + c;
+                uchar color = image[index];
+
+                // Set color of all new pixels
+                for (int i = 0; i < scale_factor; i++) {
+                    for (int j = 0; j < scale_factor; j++) {
+                        int new_x = x * scale_factor + i; // New row number
+                        int new_y = y * scale_factor + j; // New column number
+                        int new_index = new_y * new_width * 3 + new_x * 3 + c;
+                        new_image[new_index] = color;
+                    }
+                }
+            }
+        }
+    }
+    return new_image;
+}
