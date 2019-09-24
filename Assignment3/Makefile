@@ -28,5 +28,6 @@ $(OBJ) : %.o : %.c
 clean:
 	rm -Rf $(OBJ)
 	rm -Rf main
+	rm after.bmp
 
 # end

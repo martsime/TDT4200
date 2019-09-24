@@ -10,42 +10,52 @@
 // If you apply another kernel, remember not only to exchange
 // the kernel but also the kernelFactor and the correct dimension.
 
-int const sobelYKernel[] = {-1, -2, -1,
-                             0,  0,  0,
-                             1,  2,  1};
+int const sobelYKernel[] = {
+  -1, -2, -1,
+  0, 0, 0,
+  1, 2, 1
+};
 float const sobelYKernelFactor = (float) 1.0;
 
-int const sobelXKernel[] = {-1, -0, -1,
-                            -2,  0, -2,
-                            -1,  0, -1 , 0};
+int const sobelXKernel[] = {
+  -1, -0, -1,
+  -2,  0, -2,
+  -1,  0, -1 ,
+  0
+};
 float const sobelXKernelFactor = (float) 1.0;
 
-
-int const laplacian1Kernel[] = {  -1,  -4,  -1,
-                                 -4,  20,  -4,
-                                 -1,  -4,  -1};
-
+int const laplacian1Kernel[] = {
+  -1,  -4,  -1,
+  -4,  20,  -4,
+  -1,  -4,  -1
+};
 float const laplacian1KernelFactor = (float) 1.0;
 
-int const laplacian2Kernel[] = { 0,  1,  0,
-                                 1, -4,  1,
-                                 0,  1,  0};
+int const laplacian2Kernel[] = {
+  0,  1,  0,
+  1, -4,  1,
+  0,  1,  0
+};
 float const laplacian2KernelFactor = (float) 1.0;
 
-int const laplacian3Kernel[] = { -1,  -1,  -1,
-                                  -1,   8,  -1,
-                                  -1,  -1,  -1};
+int const laplacian3Kernel[] = {
+  -1,  -1,  -1,
+  -1,   8,  -1,
+  -1,  -1,  -1
+};
 float const laplacian3KernelFactor = (float) 1.0;
 
 
 //Bonus Kernel:
 
-int const gaussianKernel[] = { 1,  4,  6,  4, 1,
-                               4, 16, 24, 16, 4,
-                               6, 24, 36, 24, 6,
-                               4, 16, 24, 16, 4,
-                               1,  4,  6,  4, 1 };
-
+int const gaussianKernel[] = {
+  1,  4,  6,  4, 1,
+  4, 16, 24, 16, 4,
+  6, 24, 36, 24, 6,
+  4, 16, 24, 16, 4,
+  1,  4,  6,  4, 1
+};
 float const gaussianKernelFactor = (float) 1.0 / 256.0;
 
 
@@ -86,37 +96,37 @@ void applyKernel(unsigned char **out, unsigned char **in, unsigned int width, un
 
 
 void help(char const *exec, char const opt, char const *optarg) {
-    FILE *out = stdout;
-    if (opt != 0) {
-        out = stderr;
-        if (optarg) {
-            fprintf(out, "Invalid parameter - %c %s\n", opt, optarg);
-        } else {
-            fprintf(out, "Invalid parameter - %c\n", opt);
-        }
+  FILE *out = stdout;
+  if (opt != 0) {
+    out = stderr;
+    if (optarg) {
+      fprintf(out, "Invalid parameter - %c %s\n", opt, optarg);
+    } else {
+      fprintf(out, "Invalid parameter - %c\n", opt);
     }
-    fprintf(out, "%s [options] <input-bmp> <output-bmp>\n", exec);
-    fprintf(out, "\n");
-    fprintf(out, "Options:\n");
-    fprintf(out, "  -i, --iterations <iterations>    number of iterations (1)\n");
+  }
+  fprintf(out, "%s [options] <input-bmp> <output-bmp>\n", exec);
+  fprintf(out, "\n");
+  fprintf(out, "Options:\n");
+  fprintf(out, "  -i, --iterations <iterations>    number of iterations (1)\n");
 
-    fprintf(out, "\n");
-    fprintf(out, "Example: %s in.bmp out.bmp -i 10000\n", exec);
+  fprintf(out, "\n");
+  fprintf(out, "Example: %s in.bmp out.bmp -i 10000\n", exec);
 }
 
 int main(int argc, char **argv) {
   /*
-    Parameter parsing, don't change this!
-   */
+  Parameter parsing, don't change this!
+  */
   unsigned int iterations = 1;
   char *output = NULL;
   char *input = NULL;
   int ret = 0;
 
   static struct option const long_options[] =  {
-      {"help",       no_argument,       0, 'h'},
-      {"iterations", required_argument, 0, 'i'},
-      {0, 0, 0, 0}
+    {"help",       no_argument,       0, 'h'},
+    {"iterations", required_argument, 0, 'i'},
+    {0, 0, 0, 0}
   };
 
   static char const * short_options = "hi:";
@@ -126,18 +136,18 @@ int main(int argc, char **argv) {
     int option_index = 0;
     while ((c = getopt_long(argc, argv, short_options, long_options, &option_index)) != -1) {
       switch (c) {
-      case 'h':
-        help(argv[0],0, NULL);
-        goto graceful_exit;
-      case 'i':
-        iterations = strtol(optarg, &endptr, 10);
-        if (endptr == optarg) {
-          help(argv[0], c, optarg);
-          goto error_exit;
-        }
-        break;
-      default:
-        abort();
+        case 'h':
+          help(argv[0],0, NULL);
+          goto graceful_exit;
+        case 'i':
+          iterations = strtol(optarg, &endptr, 10);
+          if (endptr == optarg) {
+            help(argv[0], c, optarg);
+            goto error_exit;
+          }
+          break;
+        default:
+          abort();
       }
     }
   }
@@ -155,13 +165,14 @@ int main(int argc, char **argv) {
   optind++;
 
   /*
-    End of Parameter parsing!
-   */
+  End of Parameter parsing!
+  */
+
 
   /*
-    Create the BMP image and load it from disk.
-   */
-  bmpImage *image = newBmpImage(0,0);
+  Create the BMP image and load it from disk.
+  */
+  bmpImage *image = newBmpImage(0, 0);
   if (image == NULL) {
     fprintf(stderr, "Could not allocate new image!\n");
   }
@@ -192,7 +203,6 @@ int main(int argc, char **argv) {
     freeBmpImageChannel(imageChannel);
     goto error_exit;
   }
-
 
   //Here we do the actual computation!
   // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
