@@ -38,6 +38,7 @@ int* calc_split(int processes, bmpImage *image) {
 }
 
 void help(char const *exec, char const opt, char const *optarg) {
+  /* Method used to print help text */
   FILE *out = stdout;
   if (opt != 0) {
     out = stderr;
@@ -57,9 +58,7 @@ void help(char const *exec, char const opt, char const *optarg) {
 }
 
 int main(int argc, char **argv) {
-  /*
-  Parameter parsing, don't change this!
-  */
+  // Parameter parsing
   unsigned int iterations = 1;
   char *output = NULL;
   char *input = NULL;
@@ -106,14 +105,7 @@ int main(int argc, char **argv) {
   strncpy(output, argv[optind], strlen(argv[optind]));
   optind++;
 
-  /*
-  End of Parameter parsing!
-  */
-
-  /*
-  Initialize the MPI environment
-  */
-
+  // Initialize the MPI environment
   MPI_Init(NULL, NULL);
 
   int world_size;
@@ -121,10 +113,8 @@ int main(int argc, char **argv) {
 
   int world_rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-
-  /*
-  Create the BMP image and load it from disk.
-  */
+  
+  // Create the bmpImage
   bmpImage *image = newBmpImage(0, 0);
   if (image == NULL) {
     fprintf(stderr, "Could not allocate new image!\n");
@@ -147,11 +137,7 @@ int main(int argc, char **argv) {
       goto error_exit;
     }
 
-    // Extract from the loaded image an average over all colors - nothing else than
-    // a black and white representation
-    // extractImageChannel and mapImageChannel need the images to be in the exact
-    // same dimensions!
-    // Other prepared extraction functions are extractRed, extractGreen, extractBlue
+    // Extract from the loaded image an average over all colors
     if(extractImageChannel(imageChannel, image, extractAverage) != 0) {
       fprintf(stderr, "Could not extract image channel!\n");
       freeBmpImage(image);
@@ -166,77 +152,102 @@ int main(int argc, char **argv) {
       goto error_exit;
     }
   }
-  // TODO: Should be able to take arbitrary image sizes and number of processes
-  int rowsPerProcess = image->height / (world_size - 1);
-  int bytesPerProcess = rowsPerProcess * image->width;
+  
+  // Array of rows to be sendt to each process
+  int *rowSplit = calc_split(world_size, image);
 
-  bmpImageChannel *subChannel = newBmpImageChannel(image->width, rowsPerProcess);
-  unsigned char *channelBuffer = calloc(bytesPerProcess, 1);
+  // Process specific numbers
+  int rowsToRecv = rowSplit[world_rank];
+  int bytesToRecv = rowsToRecv * image->width;
+  
+  // Arrays needed by Scatterv
+  int *bytesSplit = calloc(world_size, sizeof(int));
+  int *displs = calloc(world_size, sizeof(int));
+  displs[0] = 0;
+  for (unsigned int i = 0; i < world_size; i++) {
+    bytesSplit[i] = rowSplit[i] * image->width;
+    if (i > 0) {
+      displs[i] = displs[i - 1] + bytesSplit[i - 1];
+    }
+  }
+    
+  // ImageChannel to be processed by each process
+  bmpImageChannel *subChannel = newBmpImageChannel(image->width, rowsToRecv);
+  
+  // In root process, set a pointer to the data being sent
+  unsigned char *sendPtr;
   if (world_rank == 0) {
-    for (unsigned int i = 1; i < world_size; i++) {
-      unsigned char *dataPtr = imageChannel->data[rowsPerProcess * (i - 1)];
-      MPI_Send(dataPtr, bytesPerProcess, MPI_BYTE, i, 0, MPI_COMM_WORLD);
-    }
-  } else {
-    MPI_Recv(channelBuffer, bytesPerProcess, MPI_BYTE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    subChannel->rawdata = channelBuffer;
-
-    if (unbufferBmpImageChannel(subChannel) != 0) {
-      fprintf(stderr, "Could not unbuffer bmp image channel'%s'!\n", input);
-      freeBmpImage(image);
-      goto error_exit;
-    }
+    sendPtr = imageChannel->rawdata;
   }
+  
+  // Scatter the data to all processes
+  MPI_Scatterv(
+    sendPtr,
+    bytesSplit,
+    displs,
+    MPI_BYTE,
+    subChannel->rawdata,
+    bytesToRecv,
+    MPI_BYTE,
+    0,
+    MPI_COMM_WORLD
+  );
 
-  // Here we do the actual computation!
-  // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
-
-  if (world_rank > 0) {
-    bmpImageChannel *processImageChannel = newBmpImageChannel(subChannel->width, subChannel->height);
-    for (unsigned int i = 0; i < iterations; i ++) {
-      applyKernel(processImageChannel->data,
-          subChannel->data,
-          subChannel->width,
-          subChannel->height,
-          (int *)laplacian1Kernel, 3, laplacian1KernelFactor
-          // (int *)laplacian2Kernel, 3, laplacian2KernelFactor
-          // (int *)laplacian3Kernel, 3, laplacian3KernelFactor
-          // (int *)gaussianKernel, 5, gaussianKernelFactor
-          );
-      swapImageChannel(&processImageChannel, &subChannel);
-    }
-    freeBmpImageChannel(processImageChannel);
+  // Apply the kernel to the image for i iterations
+  bmpImageChannel *processImageChannel = newBmpImageChannel(subChannel->width, subChannel->height);
+  for (unsigned int i = 0; i < iterations; i ++) {
+    applyKernel(processImageChannel->data,
+        subChannel->data,
+        subChannel->width,
+        subChannel->height,
+        (int *)laplacian1Kernel, 3, laplacian1KernelFactor
+        // (int *)laplacian2Kernel, 3, laplacian2KernelFactor
+        // (int *)laplacian3Kernel, 3, laplacian3KernelFactor
+        // (int *)gaussianKernel, 5, gaussianKernelFactor
+        );
+    swapImageChannel(&processImageChannel, &subChannel);
   }
+  freeBmpImageChannel(processImageChannel);
+  
+  // Gather the result into the root process
+  MPI_Gatherv(
+    subChannel->data[0], 
+    bytesToRecv,
+    MPI_BYTE,
+    sendPtr,
+    bytesSplit,
+    displs,
+    MPI_BYTE,
+    0,
+    MPI_COMM_WORLD
+  );
 
-  if (world_rank == 0) {
-    for (unsigned int i = 1; i < world_size; i++) {
-      MPI_Recv(imageChannel->data[rowsPerProcess * (i - 1)], bytesPerProcess, MPI_BYTE, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    }
-  } else {
-    MPI_Send(subChannel->rawdata, bytesPerProcess, MPI_BYTE, 0, 0, MPI_COMM_WORLD);
-    freeBmpImageChannel(subChannel);
-  }
-
+  // In the root process map and save the received image
   if (world_rank == 0) {
     // Map our single color image back to a normal BMP image with 3 color channels
-    // mapEqual puts the color value on all three channels the same way
-    // other mapping functions are mapRed, mapGreen, mapBlue
     if (mapImageChannel(image, imageChannel, mapEqual) != 0) {
       fprintf(stderr, "Could not map image channel!\n");
       freeBmpImage(image);
       freeBmpImageChannel(imageChannel);
       goto error_exit;
     }
-    freeBmpImageChannel(imageChannel);
 
-    //Write the image back to disk
+    // Write the image back to disk
     if (saveBmpImage(image, output) != 0) {
       fprintf(stderr, "Could not save output to '%s'!\n", output);
       freeBmpImage(image);
       goto error_exit;
     };
   }
-
+  
+  // Free all allocated memory
+  freeBmpImageChannel(subChannel);
+  freeBmpImage(image);
+  free(rowSplit);
+  free(bytesSplit);
+  free(displs);
+  
+  // Finalize MPI environment
   MPI_Finalize();
 
 graceful_exit:
