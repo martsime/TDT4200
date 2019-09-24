@@ -120,6 +120,12 @@ bmpImageChannel * newBmpImageChannel(
   return new;
 }
 
+void swapImageChannel(bmpImageChannel **one, bmpImageChannel **two) {
+  bmpImageChannel *helper = *two;
+  *two = *one;
+  *one = helper;
+}
+
 int unbufferBmpImageChannel(bmpImageChannel *image) {
   // Clear image data 
   free(image->data);

@@ -30,7 +30,8 @@ int saveBmpImage(bmpImage *image, char const *filename);
 bmpImageChannel * newBmpImageChannel(
     unsigned int const width,
     unsigned int const height
-    );
+);
+void swapImageChannel(bmpImageChannel **one, bmpImageChannel **two);
 int unbufferBmpImageChannel(bmpImageChannel *image);
 void freeBmpImageChannel(bmpImageChannel *imageChannel);
 int extractImageChannel(
