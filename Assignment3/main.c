@@ -7,6 +7,36 @@
 #include "libs/bitmap.h"
 #include "libs/kernel.h"
 
+int* calc_split(int processes, bmpImage *image) {
+  /* Calculate how many rows to send to each process */
+  int *rows = calloc(processes, sizeof(int));
+  int height = image->height;
+  
+  int rows_per_process = height / processes;
+  
+  // Check if the image can be split evenly among the number of processes
+  if (height % processes == 0) {
+    for (unsigned int i = 0; i < processes; i++) {
+      rows[i] = rows_per_process;
+    }
+  } else {
+    // Let the processes with higher ranks receive more work than the ones
+    // with lower ranks if the image is not evenly divisible by the number 
+    // of processes
+    for (int i = processes - 1; i >= 0; i--) {
+      // Check if the remaining rows are evenly divisble by the rest of the
+      // processes which havent been assigned a number of rows yet
+      if (height % (i + 1) == 0) {
+        rows[i] = rows_per_process;
+      } else {
+        rows[i] = rows_per_process + 1;
+      }
+      height -= rows[i];
+    }
+  }
+  return rows;
+}
+
 void help(char const *exec, char const opt, char const *optarg) {
   FILE *out = stdout;
   if (opt != 0) {
