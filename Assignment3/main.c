@@ -193,13 +193,72 @@ int main(int argc, char **argv) {
     MPI_COMM_WORLD
   );
 
-  // Apply the kernel to the image for i iterations
+  // Allocate temporary storage after each iteration
   bmpImageChannel *processImageChannel = newBmpImageChannel(subChannel->width, subChannel->height);
+
+  unsigned char *topHalo = calloc(subChannel->width, sizeof(char));
+  unsigned char *bottomHalo = calloc(subChannel->width, sizeof(char));
+
+  // Apply the kernel to the image for i iterations
   for (unsigned int i = 0; i < iterations; i ++) {
+
+    // Recieve ghost cells for the top row
+    if (world_rank > 0) {
+      MPI_Recv(
+        topHalo,
+        subChannel->width,
+        MPI_BYTE,
+        world_rank - 1,
+        0,
+        MPI_COMM_WORLD,
+        MPI_STATUS_IGNORE
+      );
+    }
+
+    // Send bottom row as top ghost cells to rank below
+    if (world_rank < world_size - 1) {
+      MPI_Send(
+        subChannel->data[subChannel->height - 1],
+        subChannel->width,
+        MPI_BYTE,
+        world_rank + 1,
+        0,
+        MPI_COMM_WORLD
+      );
+    }
+  
+    // Recieve ghost cells for the bottom row
+    if (world_rank < world_size - 1) {
+      MPI_Recv(
+        bottomHalo,
+        subChannel->width,
+        MPI_BYTE,
+        world_rank + 1,
+        0,
+        MPI_COMM_WORLD,
+        MPI_STATUS_IGNORE
+      );
+    }
+    
+    // Send top row as bottom ghost cells to rank above
+    if (world_rank > 0) {
+      MPI_Send(
+        subChannel->data[0],
+        subChannel->width,
+        MPI_BYTE,
+        world_rank - 1,
+        0,
+        MPI_COMM_WORLD
+      );
+    }
+    
+    // Apply kernel
     applyKernel(processImageChannel->data,
         subChannel->data,
         subChannel->width,
         subChannel->height,
+        topHalo,
+        bottomHalo,
         (int *)laplacian1Kernel, 3, laplacian1KernelFactor
         // (int *)laplacian2Kernel, 3, laplacian2KernelFactor
         // (int *)laplacian3Kernel, 3, laplacian3KernelFactor

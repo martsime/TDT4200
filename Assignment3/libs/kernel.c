@@ -1,7 +1,17 @@
 #include "kernel.h"
 
 // Apply convolutional kernel on image data
-void applyKernel(unsigned char **out, unsigned char **in, unsigned int width, unsigned int height, int *kernel, unsigned int kernelDim, float kernelFactor) {
+void applyKernel(
+  unsigned char **out,
+  unsigned char **in,
+  unsigned int width,
+  unsigned int height,
+  unsigned char *topHalo,
+  unsigned char *bottomHalo,
+  int *kernel,
+  unsigned int kernelDim,
+  float kernelFactor
+) {
   unsigned int const kernelCenter = (kernelDim / 2);
   for (unsigned int y = 0; y < height; y++) {
     for (unsigned int x = 0; x < width; x++) {
@@ -13,8 +23,13 @@ void applyKernel(unsigned char **out, unsigned char **in, unsigned int width, un
 
           int yy = y + (ky - kernelCenter);
           int xx = x + (kx - kernelCenter);
-          if (xx >= 0 && xx < (int) width && yy >=0 && yy < (int) height)
+          if (xx >= 0 && xx < (int) width && yy >=0 && yy < (int) height) {
             aggregate += in[yy][xx] * kernel[nky * kernelDim + nkx];
+          } else if (yy == -1 && xx >= 0 && xx < (int) width) {
+            aggregate += topHalo[xx] * kernel[nky * kernelDim + nkx];
+          } else if (yy == (int) height && xx >= 0 && xx < (int) width) {
+            aggregate += bottomHalo[xx] * kernel[nky * kernelDim + nkx];
+          }
         }
       }
       aggregate *= kernelFactor;

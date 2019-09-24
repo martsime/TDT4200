@@ -52,11 +52,13 @@ static int const gaussianKernel[] = {
 static float const gaussianKernelFactor = (float) 1.0 / 256.0;
 
 void applyKernel(
-    unsigned char **out,
-    unsigned char **in,
-    unsigned int width,
-    unsigned int height,
-    int *kernel,
-    unsigned int kernelDim,
-    float kernelFactor
+  unsigned char **out,
+  unsigned char **in,
+  unsigned int width,
+  unsigned int height,
+  unsigned char *topHalo,
+  unsigned char *bottomHalo,
+  int *kernel,
+  unsigned int kernelDim,
+  float kernelFactor
 );
