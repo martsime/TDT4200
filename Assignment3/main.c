@@ -7,11 +7,10 @@
 #include "libs/bitmap.h"
 #include "libs/kernel.h"
 
-int* calc_split(int processes, bmpImage *image) {
+int* calc_split(int processes, int width, int height) {
   /* Calculate how many rows to send to each process */
+
   int *rows = calloc(processes, sizeof(int));
-  int height = image->height;
-  
   int rows_per_process = height / processes;
   
   // Check if the image can be split evenly among the number of processes
@@ -114,23 +113,42 @@ int main(int argc, char **argv) {
   int world_rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
   
-  // Create the bmpImage
-  bmpImage *image = newBmpImage(0, 0);
-  if (image == NULL) {
-    fprintf(stderr, "Could not allocate new image!\n");
-  }
-  bmpImageChannel *imageChannel = NULL;
+  // Pointer to the original image
+  bmpImage *image = NULL;
 
-  // Load and extract image in root process
+  // Load image in root process
   if (world_rank == 0) {
+    image = newBmpImage(0, 0);
+    if (image == NULL) {
+      fprintf(stderr, "Could not allocate new image!\n");
+    }
     if (loadBmpImage(image, input) != 0) {
       fprintf(stderr, "Could not load bmp image '%s'!\n", input);
       freeBmpImage(image);
       goto error_exit;
     }
+  }
 
+  // Buffer for distributing image size 
+  int imageSize[2] = {};
+  
+  // Fill buffer in root process
+  if (world_rank == 0) {
+    imageSize[0] = image->width;
+    imageSize[1] = image->height;
+  }
+  
+  // Broadcast image size
+  MPI_Bcast(imageSize, 2, MPI_INT, 0, MPI_COMM_WORLD);
+  
+  int imageWidth = imageSize[0];
+  int imageHeight = imageSize[1];
+
+  // Extract image channel in root process
+  bmpImageChannel *imageChannel = NULL;
+  if (world_rank == 0) {
     // Create a single color channel image. It is easier to work just with one color
-    imageChannel = newBmpImageChannel(image->width, image->height);
+    imageChannel = newBmpImageChannel(imageWidth, imageHeight);
     if (imageChannel == NULL) {
       fprintf(stderr, "Could not allocate new image channel!\n");
       freeBmpImage(image);
@@ -144,42 +162,34 @@ int main(int argc, char **argv) {
       freeBmpImageChannel(imageChannel);
       goto error_exit;
     }
-  } else {
-    // Load only the image size if not root process
-    if (loadBmpImageSizeOnly(image, input) != 0) {
-      fprintf(stderr, "Could not load bmp image '%s'!\n", input);
-      freeBmpImage(image);
-      goto error_exit;
-    }
-  }
-  
+  } 
   // Array of rows to be sendt to each process
-  int *rowSplit = calc_split(world_size, image);
+  int *rowSplit = calc_split(world_size, imageWidth, imageHeight);
 
   // Process specific numbers
   int rowsToRecv = rowSplit[world_rank];
-  int bytesToRecv = rowsToRecv * image->width;
+  int bytesToRecv = rowsToRecv * imageWidth;
   
   // Arrays needed by Scatterv
   int *bytesSplit = calloc(world_size, sizeof(int));
   int *displs = calloc(world_size, sizeof(int));
   displs[0] = 0;
   for (unsigned int i = 0; i < world_size; i++) {
-    bytesSplit[i] = rowSplit[i] * image->width;
+    bytesSplit[i] = rowSplit[i] * imageWidth;
     if (i > 0) {
       displs[i] = displs[i - 1] + bytesSplit[i - 1];
     }
   }
     
   // ImageChannel to be processed by each process
-  bmpImageChannel *subChannel = newBmpImageChannel(image->width, rowsToRecv);
+  bmpImageChannel *subChannel = newBmpImageChannel(imageWidth, rowsToRecv);
   
   // In root process, set a pointer to the data being sent
   unsigned char *sendPtr;
   if (world_rank == 0) {
     sendPtr = imageChannel->rawdata;
   }
-  
+ 
   // Scatter the data to all processes
   MPI_Scatterv(
     sendPtr,
@@ -301,7 +311,6 @@ int main(int argc, char **argv) {
   
   // Free all allocated memory
   freeBmpImageChannel(subChannel);
-  freeBmpImage(image);
   free(rowSplit);
   free(bytesSplit);
   free(displs);
