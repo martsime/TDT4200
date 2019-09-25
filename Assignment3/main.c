@@ -6,37 +6,71 @@
 #include <mpi.h>
 #include "libs/bitmap.h"
 #include "libs/kernel.h"
+#include "libs/halo.h"
+#include "libs/grid.h"
 
 // Setting to enable/disable border exchange
-#define BORDER_EXCHANGE 1
+const int BORDER_EXCHANGE = 1;
 
-int* calc_split(int processes, int width, int height) {
-  /* Calculate how many rows to send to each process */
+// Exchaning borders every HALO_COUNT iterations
+const int HALO_COUNT = 1;
 
-  int *rows = calloc(processes, sizeof(int));
-  int rows_per_process = height / processes;
-  
-  // Check if the image can be split evenly among the number of processes
-  if (height % processes == 0) {
+// Must set which kernel to use
+int *kernel = (int *)laplacian3Kernel;
+const int kernelSize = 3;
+const float kernelFactor = laplacian3KernelFactor;
+// int *kernel = (int *)gaussianKernel;
+// const int kernelSize = 5;
+// const float kernelFactor = gaussianKernelFactor;
+
+int* calc_split(int processes, int totalCells) {
+  /* Calculate how many cells to send to each process */
+
+  int *cells = calloc(processes, sizeof(int));
+  int cellsPerProcess = totalCells / processes;
+
+  // Check if the cells can be split evenly among the number of processes
+  if (totalCells % processes == 0) {
     for (unsigned int i = 0; i < processes; i++) {
-      rows[i] = rows_per_process;
+      cells[i] = cellsPerProcess;
     }
   } else {
     // Let the processes with higher ranks receive more work than the ones
-    // with lower ranks if the image is not evenly divisible by the number 
+    // with lower ranks if the cells is not evenly divisible by the number 
     // of processes
     for (int i = processes - 1; i >= 0; i--) {
-      // Check if the remaining rows are evenly divisble by the rest of the
-      // processes which havent been assigned a number of rows yet
-      if (height % (i + 1) == 0) {
-        rows[i] = rows_per_process;
+      // Check if the remaining cells are evenly divisble by the rest of the
+      // processes which havent been assigned a number of cells yet
+      if (totalCells % (i + 1) == 0) {
+        cells[i] = cellsPerProcess;
       } else {
-        rows[i] = rows_per_process + 1;
+        cells[i] = cellsPerProcess + 1;
       }
-      height -= rows[i];
+      totalCells -= cells[i];
     }
   }
-  return rows;
+  return cells;
+}
+
+void createImageGrid(int processes, int* gridWidth, int* gridHeight) {
+  /* Creates a grid out of the number of processes */
+
+  // The algorithm prefers more rows to columns, but the numbers are as close as possible
+  // I.e 12 processes -> 4 rows and 3 columns
+  int rows = processes;
+  int columns = 1;
+  for (unsigned int i = processes - 1; i > 0; i--) {
+    if (processes % i == 0) {
+      int r = i;
+      int c = processes / i;
+      if (r >= c && r < rows && c > columns) {
+        rows = r;
+        columns = c;
+      }
+    }
+  }
+  *gridHeight = rows;
+  *gridWidth = columns;
 }
 
 void help(char const *exec, char const opt, char const *optarg) {
@@ -115,7 +149,7 @@ int main(int argc, char **argv) {
 
   int world_rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-  
+
   // Pointer to the original image
   bmpImage *image = NULL;
 
@@ -134,16 +168,16 @@ int main(int argc, char **argv) {
 
   // Buffer for distributing image size 
   int imageSize[2] = {};
-  
+
   // Fill buffer in root process
   if (world_rank == 0) {
     imageSize[0] = image->width;
     imageSize[1] = image->height;
   }
-  
+
   // Broadcast image size
   MPI_Bcast(imageSize, 2, MPI_INT, 0, MPI_COMM_WORLD);
-  
+
   int imageWidth = imageSize[0];
   int imageHeight = imageSize[1];
 
@@ -166,104 +200,194 @@ int main(int argc, char **argv) {
       goto error_exit;
     }
   } 
-  // Array of rows to be sendt to each process
-  int *rowSplit = calc_split(world_size, imageWidth, imageHeight);
+
+  // Creates a grid out of the number of processes
+  int gridHeight;
+  int gridWidth;
+  createImageGrid(world_size, &gridWidth, &gridHeight);
+
+  // Current rank's index into the grid
+  int rankRowNumber = world_rank / gridWidth;
+  int rankColNumber = world_rank % gridWidth;
+
+  // printf("Rank %d with index (%d, %d)\n", world_rank, rankColNumber, rankRowNumber);
+
+  // Arrays of number of rows and columns to be sendt to each process
+  int *rowSplit = calc_split(gridHeight, imageHeight);
+  int *colSplit = calc_split(gridWidth, imageWidth);
 
   // Process specific numbers
-  int rowsToRecv = rowSplit[world_rank];
-  int bytesToRecv = rowsToRecv * imageWidth;
-  
+  int rowsToRecv = rowSplit[rankRowNumber];
+  int colsToRecv = colSplit[rankColNumber];
+  int bytesToRecv = rowsToRecv * colsToRecv;
+
   // Arrays needed by Scatterv
   int *bytesSplit = calloc(world_size, sizeof(int));
-  int *displs = calloc(world_size, sizeof(int));
-  displs[0] = 0;
-  for (unsigned int i = 0; i < world_size; i++) {
-    bytesSplit[i] = rowSplit[i] * imageWidth;
-    if (i > 0) {
-      displs[i] = displs[i - 1] + bytesSplit[i - 1];
+  int *displ = calloc(world_size, sizeof(int));
+  displ[0] = 0;
+  for (unsigned int r = 0; r < gridHeight; r++) {
+    for (unsigned int c = 0; c < gridWidth; c++) {
+      int rankNumber = r * gridWidth + c;
+      bytesSplit[rankNumber] = rowSplit[r] * colSplit[c];
+      if (rankNumber > 0) {
+        displ[rankNumber] = displ[rankNumber - 1] + bytesSplit[rankNumber - 1];
+      }
     }
   }
-    
+
   // ImageChannel to be processed by each process
-  bmpImageChannel *subChannel = newBmpImageChannel(imageWidth, rowsToRecv);
-  
-  // In root process, set a pointer to the data being sent
-  unsigned char *sendPtr;
+  bmpImageChannel *subChannel = newBmpImageChannel(colsToRecv, rowsToRecv);
+
+  // Pointer to the data being sent
+  unsigned char *sendPtr = NULL;
+
+  // Since the displacement array requires each sub sqaure of the image to be
+  // in contigious memory, we have to rearrange the image into a new buffer
+  bmpImageChannel *sendChannel = NULL;
   if (world_rank == 0) {
-    sendPtr = imageChannel->rawdata;
+    sendChannel = newBmpImageChannel(imageWidth, imageHeight);
+    unsigned char *insertPtr = sendChannel->rawdata;
+
+    // Origin of the sub square in the original image
+    int xOrigin = 0;
+    int yOrigin = 0;
+    for (unsigned int r = 0; r < gridHeight; r++) {
+      xOrigin = 0;
+      for (unsigned int c = 0; c < gridWidth; c++) {
+        int subWidth = colSplit[c];
+        int subHeight = rowSplit[r];
+
+        for (unsigned int y = 0; y < subHeight; y++) {
+          for (unsigned int x = 0; x < subWidth; x++) {
+            *insertPtr = imageChannel->data[yOrigin + y][xOrigin + x];
+            insertPtr++; 
+          }
+        }
+        xOrigin += colSplit[c]; 
+      }
+      yOrigin += rowSplit[r];
+    }
+    sendPtr = sendChannel->rawdata;
   }
- 
+
   // Scatter the data to all processes
   MPI_Scatterv(
-    sendPtr,
-    bytesSplit,
-    displs,
-    MPI_BYTE,
-    subChannel->rawdata,
-    bytesToRecv,
-    MPI_BYTE,
-    0,
-    MPI_COMM_WORLD
-  );
+      sendPtr,
+      bytesSplit,
+      displ,
+      MPI_BYTE,
+      subChannel->rawdata,
+      bytesToRecv,
+      MPI_BYTE,
+      0,
+      MPI_COMM_WORLD
+      );
+  
 
   // Allocate temporary storage after each iteration
   bmpImageChannel *processImageChannel = newBmpImageChannel(subChannel->width, subChannel->height);
+  
+  int haloWidth = (kernelSize - 1) / 2 * HALO_COUNT;
+  // Struct with recieve buffers
+  imageHalo *recvHalo = newImageHalo(subChannel->width, subChannel->height, haloWidth);
+  imageHalo *sendHalo = newImageHalo(subChannel->width, subChannel->height, haloWidth);
+  
+  // Numbers of elements to send for east and west 
+  int hCount = haloWidth * recvHalo->height;
 
-  unsigned char *topHalo = calloc(subChannel->width, sizeof(char));
-  unsigned char *bottomHalo = calloc(subChannel->width, sizeof(char));
+  // Numbers of elements to send for north and south
+  int vCount = (recvHalo->width + 2*haloWidth) * haloWidth;
 
   // Apply the kernel to the image for i iterations
-  for (unsigned int i = 0; i < iterations; i ++) {
-   
+  for (int i = 0; i < iterations; i++) {
+
     // Check if border exchange is turned on
-    if (BORDER_EXCHANGE) {
-      // Recieve ghost cells for the top row
-      if (world_rank > 0) {
+    if (BORDER_EXCHANGE && (i == 0 || i % HALO_COUNT == 0)) {
+      // printf("Rank %d exchaning border at iteration %d\n", world_rank, i);
+      if (rankColNumber > 0) {
+        // Send east and recieve west
         MPI_Recv(
-          topHalo,
-          subChannel->width,
-          MPI_BYTE,
-          world_rank - 1,
-          0,
-          MPI_COMM_WORLD,
-          MPI_STATUS_IGNORE
+            recvHalo->rawwest,
+            hCount,
+            MPI_BYTE,
+            world_rank - 1,
+            0,
+            MPI_COMM_WORLD,
+            MPI_STATUS_IGNORE
+        );
+        createWestHalo(sendHalo->rawwest, sendHalo->count, subChannel);
+        MPI_Send(
+            sendHalo->rawwest,
+            hCount,
+            MPI_BYTE,
+            world_rank - 1,
+            0,
+            MPI_COMM_WORLD
         );
       }
 
-      // Send bottom row as top ghost cells to rank below
-      if (world_rank < world_size - 1) {
+      if (rankColNumber < gridWidth - 1) {
+        // Send east and recieve west
+        createEastHalo(sendHalo->raweast, sendHalo->count, subChannel);
         MPI_Send(
-          subChannel->data[subChannel->height - 1],
-          subChannel->width,
-          MPI_BYTE,
-          world_rank + 1,
-          0,
-          MPI_COMM_WORLD
+            sendHalo->raweast,
+            hCount,
+            MPI_BYTE,
+            world_rank + 1,
+            0,
+            MPI_COMM_WORLD
         );
-      }
-    
-      // Recieve ghost cells for the bottom row
-      if (world_rank < world_size - 1) {
         MPI_Recv(
-          bottomHalo,
-          subChannel->width,
-          MPI_BYTE,
-          world_rank + 1,
-          0,
-          MPI_COMM_WORLD,
-          MPI_STATUS_IGNORE
+            recvHalo->raweast,
+            hCount,
+            MPI_BYTE,
+            world_rank + 1,
+            0,
+            MPI_COMM_WORLD,
+            MPI_STATUS_IGNORE
         );
       }
-      
-      // Send top row as bottom ghost cells to rank above
-      if (world_rank > 0) {
+
+      if (rankRowNumber > 0) {
+        MPI_Recv(
+            recvHalo->rawnorth,
+            vCount,
+            MPI_BYTE,
+            world_rank - gridWidth,
+            0,
+            MPI_COMM_WORLD,
+            MPI_STATUS_IGNORE
+        );
+        createNorthHalo(sendHalo->rawnorth, sendHalo->count, subChannel, recvHalo);
         MPI_Send(
-          subChannel->data[0],
-          subChannel->width,
-          MPI_BYTE,
-          world_rank - 1,
-          0,
-          MPI_COMM_WORLD
+            sendHalo->rawnorth,
+            vCount,
+            MPI_BYTE,
+            world_rank - gridWidth,
+            0,
+            MPI_COMM_WORLD
+        );
+      }
+
+      if (rankRowNumber < gridHeight - 1) {
+        createSouthHalo(sendHalo->rawsouth, sendHalo->count, subChannel, recvHalo);
+        
+        MPI_Send(
+            sendHalo->rawsouth,
+            vCount,
+            MPI_BYTE,
+            world_rank + gridWidth,
+            0,
+            MPI_COMM_WORLD
+        );
+        MPI_Recv(
+            recvHalo->rawsouth,
+            vCount,
+            MPI_BYTE,
+            world_rank + gridWidth,
+            0,
+            MPI_COMM_WORLD,
+            MPI_STATUS_IGNORE
         );
       }
     }
@@ -271,31 +395,59 @@ int main(int argc, char **argv) {
     // Apply kernel
     applyKernel(processImageChannel->data,
         subChannel->data,
-        subChannel->width,
-        subChannel->height,
-        topHalo,
-        bottomHalo,
-        (int *)laplacian1Kernel, 3, laplacian1KernelFactor
+        sendHalo,
+        recvHalo,
+        kernel, kernelSize, kernelFactor
+        // (int *)sobelYKernel, 3, sobelYKernelFactor
         // (int *)laplacian2Kernel, 3, laplacian2KernelFactor
         // (int *)laplacian3Kernel, 3, laplacian3KernelFactor
         // (int *)gaussianKernel, 5, gaussianKernelFactor
         );
     swapImageChannel(&processImageChannel, &subChannel);
+    swapHalo(&sendHalo, &recvHalo);
   }
   freeBmpImageChannel(processImageChannel);
-  
+
   // Gather the result into the root process
   MPI_Gatherv(
-    subChannel->data[0], 
+    subChannel->rawdata, 
     bytesToRecv,
     MPI_BYTE,
     sendPtr,
     bytesSplit,
-    displs,
+    displ,
     MPI_BYTE,
     0,
     MPI_COMM_WORLD
   );
+  
+  freeImageHalo(recvHalo);
+  freeImageHalo(sendHalo);
+
+  if (world_rank == 0) {
+    unsigned char *recvPtr = sendPtr;
+
+    // Origin of the sub square in the original image
+    int xOrigin = 0;
+    int yOrigin = 0;
+    for (unsigned int r = 0; r < gridHeight; r++) {
+      xOrigin = 0;
+      for (unsigned int c = 0; c < gridWidth; c++) {
+        int subWidth = colSplit[c];
+        int subHeight = rowSplit[r];
+
+        for (unsigned int y = 0; y < subHeight; y++) {
+          for (unsigned int x = 0; x < subWidth; x++) {
+            imageChannel->data[yOrigin + y][xOrigin + x] = *recvPtr;
+            recvPtr++; 
+          }
+        }
+        xOrigin += colSplit[c]; 
+      }
+      yOrigin += rowSplit[r];
+    }
+    freeBmpImageChannel(sendChannel);
+  }
 
   // In the root process map and save the received image
   if (world_rank == 0) {
@@ -313,19 +465,27 @@ int main(int argc, char **argv) {
       freeBmpImage(image);
       goto error_exit;
     };
+    freeBmpImage(image);
+    freeBmpImageChannel(imageChannel);
   }
-  
+
   // Free all allocated memory
   freeBmpImageChannel(subChannel);
   free(rowSplit);
+  free(colSplit);
   free(bytesSplit);
-  free(displs);
-  
+  free(displ);
+
   // Finalize MPI environment
   MPI_Finalize();
 
 graceful_exit:
   ret = 0;
+  if (input)
+    free(input);
+  if (output)
+    free(output);
+  return ret;
 error_exit:
   if (input)
     free(input);

@@ -1,3 +1,7 @@
+#include "halo.h"
+#ifndef KERNEL_H
+#define KERNEL_H
+
 // Convolutional Kernel Examples, each with dimension 3,
 // gaussian kernel with dimension 5
 // If you apply another kernel, remember not only to exchange
@@ -54,11 +58,11 @@ static float const gaussianKernelFactor = (float) 1.0 / 256.0;
 void applyKernel(
   unsigned char **out,
   unsigned char **in,
-  unsigned int width,
-  unsigned int height,
-  unsigned char *topHalo,
-  unsigned char *bottomHalo,
+  imageHalo *outHalo,
+  imageHalo *inHalo,
   int *kernel,
   unsigned int kernelDim,
   float kernelFactor
 );
+
+#endif
