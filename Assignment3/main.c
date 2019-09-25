@@ -7,6 +7,9 @@
 #include "libs/bitmap.h"
 #include "libs/kernel.h"
 
+// Setting to enable/disable border exchange
+#define BORDER_EXCHANGE 1
+
 int* calc_split(int processes, int width, int height) {
   /* Calculate how many rows to send to each process */
 
@@ -211,55 +214,58 @@ int main(int argc, char **argv) {
 
   // Apply the kernel to the image for i iterations
   for (unsigned int i = 0; i < iterations; i ++) {
+   
+    // Check if border exchange is turned on
+    if (BORDER_EXCHANGE) {
+      // Recieve ghost cells for the top row
+      if (world_rank > 0) {
+        MPI_Recv(
+          topHalo,
+          subChannel->width,
+          MPI_BYTE,
+          world_rank - 1,
+          0,
+          MPI_COMM_WORLD,
+          MPI_STATUS_IGNORE
+        );
+      }
 
-    // Recieve ghost cells for the top row
-    if (world_rank > 0) {
-      MPI_Recv(
-        topHalo,
-        subChannel->width,
-        MPI_BYTE,
-        world_rank - 1,
-        0,
-        MPI_COMM_WORLD,
-        MPI_STATUS_IGNORE
-      );
-    }
-
-    // Send bottom row as top ghost cells to rank below
-    if (world_rank < world_size - 1) {
-      MPI_Send(
-        subChannel->data[subChannel->height - 1],
-        subChannel->width,
-        MPI_BYTE,
-        world_rank + 1,
-        0,
-        MPI_COMM_WORLD
-      );
-    }
-  
-    // Recieve ghost cells for the bottom row
-    if (world_rank < world_size - 1) {
-      MPI_Recv(
-        bottomHalo,
-        subChannel->width,
-        MPI_BYTE,
-        world_rank + 1,
-        0,
-        MPI_COMM_WORLD,
-        MPI_STATUS_IGNORE
-      );
-    }
+      // Send bottom row as top ghost cells to rank below
+      if (world_rank < world_size - 1) {
+        MPI_Send(
+          subChannel->data[subChannel->height - 1],
+          subChannel->width,
+          MPI_BYTE,
+          world_rank + 1,
+          0,
+          MPI_COMM_WORLD
+        );
+      }
     
-    // Send top row as bottom ghost cells to rank above
-    if (world_rank > 0) {
-      MPI_Send(
-        subChannel->data[0],
-        subChannel->width,
-        MPI_BYTE,
-        world_rank - 1,
-        0,
-        MPI_COMM_WORLD
-      );
+      // Recieve ghost cells for the bottom row
+      if (world_rank < world_size - 1) {
+        MPI_Recv(
+          bottomHalo,
+          subChannel->width,
+          MPI_BYTE,
+          world_rank + 1,
+          0,
+          MPI_COMM_WORLD,
+          MPI_STATUS_IGNORE
+        );
+      }
+      
+      // Send top row as bottom ghost cells to rank above
+      if (world_rank > 0) {
+        MPI_Send(
+          subChannel->data[0],
+          subChannel->width,
+          MPI_BYTE,
+          world_rank - 1,
+          0,
+          MPI_COMM_WORLD
+        );
+      }
     }
     
     // Apply kernel
