@@ -247,7 +247,7 @@ int main(int argc, char **argv) {
   for (int i = 0; i < iterations; i++) {
 
     // Check if border exchange should be done
-    if (BORDER_EXCHANGE && (i == 0 || i % HALO_COUNT == 0)) {
+    if (BORDER_EXCHANGE && HALO_COUNT > 0 && (i == 0 || i % HALO_COUNT == 0)) {
       if (rankColNumber > 0) {
         // Recv and send west
         MPI_Recv(
