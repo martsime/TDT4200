@@ -15,63 +15,10 @@ const int BORDER_EXCHANGE = 1;
 // Exchaning borders every HALO_COUNT iterations
 const int HALO_COUNT = 1;
 
-// Must set which kernel to use
-int *kernel = (int *)laplacian3Kernel;
+// Which kernel to use
+int *kernel = (int *)laplacian1Kernel;
 const int kernelSize = 3;
-const float kernelFactor = laplacian3KernelFactor;
-// int *kernel = (int *)gaussianKernel;
-// const int kernelSize = 5;
-// const float kernelFactor = gaussianKernelFactor;
-
-int* calc_split(int processes, int totalCells) {
-  /* Calculate how many cells to send to each process */
-
-  int *cells = calloc(processes, sizeof(int));
-  int cellsPerProcess = totalCells / processes;
-
-  // Check if the cells can be split evenly among the number of processes
-  if (totalCells % processes == 0) {
-    for (unsigned int i = 0; i < processes; i++) {
-      cells[i] = cellsPerProcess;
-    }
-  } else {
-    // Let the processes with higher ranks receive more work than the ones
-    // with lower ranks if the cells is not evenly divisible by the number 
-    // of processes
-    for (int i = processes - 1; i >= 0; i--) {
-      // Check if the remaining cells are evenly divisble by the rest of the
-      // processes which havent been assigned a number of cells yet
-      if (totalCells % (i + 1) == 0) {
-        cells[i] = cellsPerProcess;
-      } else {
-        cells[i] = cellsPerProcess + 1;
-      }
-      totalCells -= cells[i];
-    }
-  }
-  return cells;
-}
-
-void createImageGrid(int processes, int* gridWidth, int* gridHeight) {
-  /* Creates a grid out of the number of processes */
-
-  // The algorithm prefers more rows to columns, but the numbers are as close as possible
-  // I.e 12 processes -> 4 rows and 3 columns
-  int rows = processes;
-  int columns = 1;
-  for (unsigned int i = processes - 1; i > 0; i--) {
-    if (processes % i == 0) {
-      int r = i;
-      int c = processes / i;
-      if (r >= c && r < rows && c > columns) {
-        rows = r;
-        columns = c;
-      }
-    }
-  }
-  *gridHeight = rows;
-  *gridWidth = columns;
-}
+const float kernelFactor = laplacian1KernelFactor;
 
 void help(char const *exec, char const opt, char const *optarg) {
   /* Method used to print help text */
@@ -210,11 +157,9 @@ int main(int argc, char **argv) {
   int rankRowNumber = world_rank / gridWidth;
   int rankColNumber = world_rank % gridWidth;
 
-  // printf("Rank %d with index (%d, %d)\n", world_rank, rankColNumber, rankRowNumber);
-
   // Arrays of number of rows and columns to be sendt to each process
-  int *rowSplit = calc_split(gridHeight, imageHeight);
-  int *colSplit = calc_split(gridWidth, imageWidth);
+  int *rowSplit = calcSplit(gridHeight, imageHeight);
+  int *colSplit = calcSplit(gridWidth, imageWidth);
 
   // Process specific numbers
   int rowsToRecv = rowSplit[rankRowNumber];
@@ -301,11 +246,10 @@ int main(int argc, char **argv) {
   // Apply the kernel to the image for i iterations
   for (int i = 0; i < iterations; i++) {
 
-    // Check if border exchange is turned on
+    // Check if border exchange should be done
     if (BORDER_EXCHANGE && (i == 0 || i % HALO_COUNT == 0)) {
-      // printf("Rank %d exchaning border at iteration %d\n", world_rank, i);
       if (rankColNumber > 0) {
-        // Send east and recieve west
+        // Recv and send west
         MPI_Recv(
             recvHalo->rawwest,
             hCount,
@@ -327,7 +271,7 @@ int main(int argc, char **argv) {
       }
 
       if (rankColNumber < gridWidth - 1) {
-        // Send east and recieve west
+        // Send and recv east
         createEastHalo(sendHalo->raweast, sendHalo->count, subChannel);
         MPI_Send(
             sendHalo->raweast,
@@ -349,6 +293,7 @@ int main(int argc, char **argv) {
       }
 
       if (rankRowNumber > 0) {
+        // Recv and send north
         MPI_Recv(
             recvHalo->rawnorth,
             vCount,
@@ -370,8 +315,8 @@ int main(int argc, char **argv) {
       }
 
       if (rankRowNumber < gridHeight - 1) {
+        // Send and recv south
         createSouthHalo(sendHalo->rawsouth, sendHalo->count, subChannel, recvHalo);
-        
         MPI_Send(
             sendHalo->rawsouth,
             vCount,
@@ -393,16 +338,17 @@ int main(int argc, char **argv) {
     }
     
     // Apply kernel
-    applyKernel(processImageChannel->data,
-        subChannel->data,
-        sendHalo,
-        recvHalo,
-        kernel, kernelSize, kernelFactor
-        // (int *)sobelYKernel, 3, sobelYKernelFactor
-        // (int *)laplacian2Kernel, 3, laplacian2KernelFactor
-        // (int *)laplacian3Kernel, 3, laplacian3KernelFactor
-        // (int *)gaussianKernel, 5, gaussianKernelFactor
-        );
+    applyKernel(
+      processImageChannel->data,
+      subChannel->data,
+      sendHalo,
+      recvHalo,
+      kernel,
+      kernelSize,
+      kernelFactor
+    );
+
+    // Swap channel and halo
     swapImageChannel(&processImageChannel, &subChannel);
     swapHalo(&sendHalo, &recvHalo);
   }
@@ -424,6 +370,8 @@ int main(int argc, char **argv) {
   freeImageHalo(recvHalo);
   freeImageHalo(sendHalo);
 
+  // Whole image gathered is stored such that each process'
+  // sub image
   if (world_rank == 0) {
     unsigned char *recvPtr = sendPtr;
 
