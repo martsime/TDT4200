@@ -7,6 +7,7 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <complex.h>
+#include <time.h>
 #include "libs/bitmap.h"
 #include "libs/utilities.h"
 #include "main.h"
@@ -31,68 +32,60 @@ static unsigned int colourMapSize = 0;
 static unsigned int res = 2048;
 static unsigned int maxDwell = 512;
 
-
-pixel getDwellColour(unsigned int const y, unsigned int const x, unsigned long long const dwell) {
-	static const double log2 = 0.693147180559945309417232121458176568075500134360255254120;
-	double complex z = x + y * I;
-	unsigned long long index = dwell + 1 - log(log(cabs(z)/log2));
-	return colourMap[index % colourMapSize];
-}
-
-
-double complex getInitialValue(double complex const cmin, double complex const cmax, unsigned int const y, unsigned int const x) {
-	double real = ((double) x / res) * creal(cmax - cmin) + creal(cmin);
-	double imag = ((double) y / res) * cimag(cmax - cmin) + cimag(cmin);
-	double complex ret = real + imag * I;
-	return ret;
-}
-
-double complex computeNextValue(double complex const z, double complex const init) {
-	return (z * z) + init;
-}
-
-bool isPartOfMandelbrot(double complex const z, double const factor) {
-	return cabs(z) < (factor * factor);
-}
-
-unsigned long long pixelDwell(double complex const cmin,
-						double complex const cmax,
-						unsigned int const y,
-						unsigned int const x)
-{
-	double complex z = getInitialValue(cmin, cmax, y, x);
-	unsigned int const dwellInc = 1;
-	unsigned long long dwell = 0;
-
-	// Exit condition: dwell is maxDwell or |z| >= 4
-	while(dwell < maxDwell && isPartOfMandelbrot(z, 2.0)) {
-		// z = z² + initValue
-		z = computeNextValue(z, getInitialValue(cmin, cmax, y, x));
-		dwell += dwellInc;
-	}
-
-	return dwell;
-}
+// Const log2
+static const double const_log2= 0.693147180559945309417232121458176568075500134360255254120;
 
 void computeDwellBuffer(unsigned long long **buffer, double complex cmin, double complex cmax) {
-	for (unsigned int x = 0; x < res; x++) {
-		for (unsigned int y = 0; y < res; y++) {
-			buffer[y][x] = pixelDwell(cmin, cmax, y, x);
-		}
-	}
+  
+  // Calculate these values only once
+  double crealDiff = creal(cmax - cmin);
+  double crealMin = creal(cmin);
+  double cimagDiff = cimag(cmax - cmin);
+  double cimagMin = cimag(cmin);
+  
+  // Loop over every pixel
+	for (unsigned int y = 0; y < res; y++) {
+    for (unsigned int x = 0; x < res; x++) {
+    
+      double real = ((double) x / res) * crealDiff + crealMin;
+      double imag = ((double) y / res) * cimagDiff + cimagMin;
+      double complex initValue = real + imag * I;
+      double complex z = real + imag * I;
+      unsigned int const dwellInc = 1;
+      unsigned long long dwell = 0;
+
+      // Exit condition: dwell is maxDwell or |z| >= 4
+      while(dwell < maxDwell && (cabs(z) < (4.0))) {
+        // z = z² + initValue
+        z = z * z + initValue;
+        dwell += dwellInc;
+      }
+
+		  buffer[y][x] = dwell;
+    }
+  }
 }
 
 void mapDwellBuffer(bmpImage *image, unsigned long long **buffer) {
-	for (unsigned int x = 0; x < res; x++) {
-		for (unsigned int y = 0; y < res; y++) {
-			pixel *colour = malloc(sizeof(pixel));
-			*colour = getDwellColour(y, x, buffer[y][x]);
+
+  // Allocate memory for colours only once
+  pixel *rawColours = malloc(res * res * sizeof(pixel));
+  pixel *colour = rawColours;
+	for (unsigned int y = 0; y < res; y++) {
+    for (unsigned int x = 0; x < res; x++) {
+      
+      // getDwellColour
+      double complex z = x + y * I;
+      unsigned long long index = buffer[y][x] + 1 - log(log(cabs(z)/const_log2));
+      *colour = colourMap[index % colourMapSize];
+
 			image->data[y][x].r = colour->r;
 			image->data[y][x].g = colour->g;
 			image->data[y][x].b = colour->b;
-			free(colour);
+      colour++;
 		}
 	}
+  free(rawColours);
 }
 
 void help(char const *exec, char const opt, char const *optarg) {
@@ -121,6 +114,7 @@ int main( int argc, char *argv[] )
 	/* Standard Values */
 	char *output = NULL; //output image filepath
 	bmpImage *image = NULL; //output image
+	unsigned long long *rawDwellBuffer = NULL;
 	unsigned long long **dwellBuffer = NULL;
 	double x = 0.5, y = 0.5; // coordinates
 	double scale = 1; // scaling factor
@@ -204,29 +198,29 @@ int main( int argc, char *argv[] )
 	}
 
 
-	//Allocate bmp image
+	// Allocate bmp image
 	image = newBmpImage(res, res);
 	if (image == NULL) {
 		fprintf(stderr, "ERROR: could not allocate bmp image space!\n");
 		goto error_exit;
 	}
 
-	//Allocate the Dwell buffer, 2 dimensional array
-	dwellBuffer = malloc(res * sizeof(unsigned long long *));
-	if (dwellBuffer == NULL) {
-		fprintf(stderr, "ERROR: could not allocate dwell buffer\n");
+	// Allocate the Dwell buffer
+	rawDwellBuffer = malloc(res * res * sizeof(unsigned long long));
+	if (rawDwellBuffer == NULL) {
+		fprintf(stderr, "ERROR: could not allocate raw dwell buffer\n");
 		goto error_exit;
 	}
-	for (unsigned int y = 0; y < res; y++) {
-		dwellBuffer[y] = malloc(res * sizeof(unsigned long long));
-		if (dwellBuffer[y] == NULL) {
-			fprintf(stderr, "ERROR: could not allocate dwell buffer\n");
-			for (unsigned int j= 0; j < y; j++) {
-				free(dwellBuffer[j]);
-			}
-			goto error_exit;
+	dwellBuffer = malloc(res * sizeof(unsigned long long *));
+  if (dwellBuffer == NULL) {
+		fprintf(stderr, "ERROR: could not allocate dwell buffer\n");
+    free(rawDwellBuffer);
+		goto error_exit;
+  }
 
-		}
+  // Map 2D dwellBuffer to contiguous array rawDwellBuffer
+	for (unsigned int y = 0; y < res; y++) {
+    dwellBuffer[y] = &(rawDwellBuffer[y * res]);
 	}
 
 	//Compute the dwell buffer
@@ -234,7 +228,7 @@ int main( int argc, char *argv[] )
 
 	//Map the dwell buffer to the bmpImage with fancy colors
 	mapDwellBuffer(image, dwellBuffer);
-
+  
 	// Save the Image
 	if(saveBmpImage(image, output)) {
 		fprintf(stderr, "ERROR: could not save image to %s\n", output);
@@ -249,12 +243,9 @@ exit_graceful:
 		freeBmpImage(image);
 	if(colourMap)
 		free(colourMap);
-	if(dwellBuffer) {
-		for (unsigned int i = 0; i < res; i++) {
-			free(dwellBuffer[i]);
-		}
-		free(dwellBuffer);
-	}
+
+  free(dwellBuffer);
+  free(rawDwellBuffer);
 
 	return 0;
 }
