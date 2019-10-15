@@ -63,6 +63,7 @@ job popJob (jobQueue **head) {
 }
 
 jobQueue *jobQueueHead = NULL;
+pthread_mutex_t jobQueueMutex = PTHREAD_MUTEX_INITIALIZER;
 
 void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int const, unsigned int const),
 			   dwellType *buffer,
@@ -75,8 +76,20 @@ void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int co
 }
 
 void *worker(void *id) {
-	(void) id;
-	// This could be your pthread function
+  long my_id = (long) id;
+  
+  // Continue until the jobQueue is empty
+  while (true) {
+    pthread_mutex_lock(&jobQueueMutex);
+    if (jobQueueHead != NULL) {
+      struct job nextWork = popJob(&jobQueueHead);
+      // TODO: Do work here
+      pthread_mutex_unlock(&jobQueueMutex);
+    } else {
+      pthread_mutex_unlock(&jobQueueMutex);
+      break;
+    }
+  }
 	return NULL;
 }
 
