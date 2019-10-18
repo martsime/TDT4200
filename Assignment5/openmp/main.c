@@ -45,7 +45,22 @@ void omp_mxm(double *A, double *B, double *C, int m, int n, int k)
 
 void blas_mxm(double *A, double *B, double *C, int m, int n, int k)
 {
-  printf("BLAS version not implemented yet!\n");
+  cblas_dgemm(
+    CblasRowMajor,
+    CblasNoTrans,
+    CblasNoTrans,
+    m,
+    n,
+    k,
+    1.0,
+    A,
+    k,
+    B,
+    n,
+    1.0,
+    C,
+    n
+  );
 }
 
 int main(const unsigned int argc, char **argv)
