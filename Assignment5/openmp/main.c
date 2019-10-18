@@ -31,7 +31,16 @@ void serial_mxm(const double *A, const double *B, double *C, int m, int n, int k
 
 void omp_mxm(double *A, double *B, double *C, int m, int n, int k)
 {
-  printf("OpenMP version not implemented yet!\n");
+  #pragma omp parallel for
+  for (int i = 0; i < m; i++) {
+    // printf("Number of OpenMP threads %d\n", omp_get_num_threads());
+    for (int j = 0; j < n; j++) {
+      C[i*n + j] = 0;
+      for (int l = 0; l < k; l++) {
+        C[i*n + j] += A[i*k + l] * B[l*n + j];
+      }
+    }
+  }
 }
 
 void blas_mxm(double *A, double *B, double *C, int m, int n, int k)
