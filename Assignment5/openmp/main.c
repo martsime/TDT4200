@@ -10,6 +10,8 @@
 //Threshold for testing validity of matrix matrix multiplication
 #define ERROR_THRESHOLD 0.0001
 
+#define BILLION 1000000000L
+
 //For measuring wall time using omp_get_wtime()
 static double start;
 static double end;
@@ -72,6 +74,9 @@ int main(const unsigned int argc, char **argv)
     C[i] = 0.0;
   }
 
+  struct timespec start_time, end_time;
+  clock_gettime(CLOCK_MONOTONIC, &start_time);
+
   switch (input) {
     case 's':
       serial_mxm(A, B, C, m, n, k);
@@ -89,6 +94,10 @@ int main(const unsigned int argc, char **argv)
       printf("\tb(las)\n");
       return 0;
   }
+
+  clock_gettime(CLOCK_MONOTONIC, &end_time);
+  start = (double) start_time.tv_sec + (double) start_time.tv_nsec / BILLION;
+  end = (double) end_time.tv_sec + (double) end_time.tv_nsec / BILLION;
 
   printf("\nTop left of A:\n");
   for (int i = 0; i < 5; i++) {
