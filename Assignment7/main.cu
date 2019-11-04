@@ -204,8 +204,9 @@ int main(int argc, char **argv) {
 
   unsigned char *cudaRawInImage;
   unsigned char *cudaRawOutImage;
-  cudaMalloc(&cudaRawInImage, imageSize);
-  cudaMalloc(&cudaRawOutImage, imageSize);
+  cudaErrorCheck(cudaMalloc(&cudaRawInImage, imageSize));
+  cudaErrorCheck(cudaMalloc(&cudaRawOutImage, imageSize));
+  cudaErrorCheck(cudaMemcpy(cudaRawInImage, imageChannel->rawdata, imageSize, cudaMemcpyHostToDevice));
 
   //Here we do the actual computation!
   // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
@@ -231,8 +232,8 @@ int main(int argc, char **argv) {
   freeBmpImageChannel(processImageChannel);
 
   // Free cuda memory
-  cudaFree(cudaRawInImage);
-  cudaFree(cudaRawOutImage);
+  cudaErrorCheck(cudaFree(cudaRawInImage));
+  cudaErrorCheck(cudaFree(cudaRawOutImage));
 
   // Map our single color image back to a normal BMP image with 3 color channels
   // mapEqual puts the color value on all three channels the same way
