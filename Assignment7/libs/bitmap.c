@@ -75,6 +75,15 @@ void freeBmpImageChannel(bmpImageChannel *image) {
 	}
 }
 
+void swapBmpImageChannels(bmpImageChannel *channelOne, bmpImageChannel *channelTwo) {
+    unsigned char **tmp = channelOne->data;
+    channelOne->data = channelTwo->data;
+    channelTwo->data = tmp;
+    unsigned char * tmp_raw = channelOne->rawdata;
+    channelOne->rawdata = channelTwo->rawdata;
+    channelTwo->rawdata = tmp_raw;
+}
+
 int reallocateBmpChannelBuffer(bmpImageChannel *image, unsigned int const width, unsigned int const height) {
 	freeBmpChannelData(image);
 	if (height * width > 0) {

@@ -28,6 +28,7 @@ int saveBmpImage(bmpImage *image, char const *filename);
 
 bmpImageChannel * newBmpImageChannel(unsigned int const width, unsigned int const height);
 void freeBmpImageChannel(bmpImageChannel *imageChannel);
+void swapBmpImageChannels(bmpImageChannel *channelOne, bmpImageChannel *channelTwo);
 int extractImageChannel(bmpImageChannel *to, bmpImage *from, unsigned char extractMethod(pixel from));
 int mapImageChannel(bmpImage *to, bmpImageChannel *from, pixel extractMethod(unsigned char from));
 pixel mapRedChannel(unsigned char from);
