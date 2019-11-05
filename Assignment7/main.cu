@@ -208,6 +208,17 @@ int main(int argc, char **argv) {
   cudaErrorCheck(cudaMalloc(&cudaRawOutImage, imageSize));
   cudaErrorCheck(cudaMemcpy(cudaRawInImage, imageChannel->rawdata, imageSize, cudaMemcpyHostToDevice));
 
+  // Specify which filter to use
+  int *filter = (int *) laplacian1Filter;
+  int filterSize = sizeof(laplacian1Filter);
+  unsigned int filterDim = 3;
+  float filterFactor = laplacian1FilterFactor;
+
+  // Copy the filter to device
+  int *cudaFilter;
+  cudaErrorCheck(cudaMalloc(&cudaFilter, filterSize));
+  cudaErrorCheck(cudaMemcpy(cudaFilter, filter, filterSize, cudaMemcpyHostToDevice));
+
   //Here we do the actual computation!
   // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
   bmpImageChannel *processImageChannel = newBmpImageChannel(imageChannel->width, imageChannel->height);
@@ -234,6 +245,7 @@ int main(int argc, char **argv) {
   // Free cuda memory
   cudaErrorCheck(cudaFree(cudaRawInImage));
   cudaErrorCheck(cudaFree(cudaRawOutImage));
+  cudaErrorCheck(cudaFree(cudaFilter));
 
   // Map our single color image back to a normal BMP image with 3 color channels
   // mapEqual puts the color value on all three channels the same way
